@@ -8,7 +8,7 @@
 
 	<PropertyGroup>
 		<PackageId>RabbitMq.Messaging.Toolkit</PackageId>
-		<Version>1.0.0</Version>
+		<Version>1.0.1</Version>
 		<Authors>Otávio M. B. da Rocha</Authors>
 		<Description>Abstração simples e robusta para RabbitMQ em .NET.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
