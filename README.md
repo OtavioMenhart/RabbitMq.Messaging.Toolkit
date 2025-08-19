@@ -1,6 +1,6 @@
-# RabbitMq.Messaging
+# RabbitMq.Messaging.Toolkit
 
-**RabbitMq.Messaging** is a **.NET 9** library that provides a simple and robust abstraction for working with **RabbitMQ**.  
+**RabbitMq.Messaging.Toolkit** is a **.NET 9** library that provides a simple and robust abstraction for working with **RabbitMQ**.  
 It offers ready-to-use **publisher** and **consumer services**, making it easy to integrate message-based communication and background processing into your projects.
 
 ---
