@@ -150,8 +150,7 @@ services.AddHostedService<MyConsumer>();
 {
   "RabbitMq": {
     "MaxRetryAttempts": 3,
-    "RetryTTlMilliseconds": 30000,
-    "ExchangeRequeue": "exchange-requeue"
+    "RetryTTlMilliseconds": 30000
   }
 }
 ```
