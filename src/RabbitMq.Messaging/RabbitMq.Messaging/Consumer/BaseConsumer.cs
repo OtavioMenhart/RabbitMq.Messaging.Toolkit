@@ -36,7 +36,6 @@ namespace RabbitMq.Messaging.Consumer
         private string _dlqQueueName = null!;
         private string _directToQueueKey = null!;
         private string _directToRetryKey = null!;
-        private readonly string _exchangeRequeue = null!;
 
         // --- Protected Members ---
         protected readonly ILogger _logger;
@@ -91,7 +90,6 @@ namespace RabbitMq.Messaging.Consumer
             // Retry attempts and ttl milliseconds
             _maxRetryAttempts = configuration.GetValue<int?>("RabbitMq:MaxRetryAttempts") ?? 3;
             _retryTtlMilliseconds = configuration.GetValue<int?>("RabbitMq:RetryTTlMilliseconds") ?? 30000;
-            _exchangeRequeue = configuration.GetValue<string?>("RabbitMq:ExchangeRequeue") ?? "exchange-requeue";
         }
 
         /// <summary>
@@ -240,7 +238,6 @@ namespace RabbitMq.Messaging.Consumer
 
             // 2. Declare the retry handler exchange (Direct) for targeted redelivery and requeue.
             await channel.ExchangeDeclareAsync(exchange: _retryHandlerExchange, type: ExchangeType.Direct, durable: true);
-            await channel.ExchangeDeclareAsync(exchange: _exchangeRequeue, type: ExchangeType.Direct, durable: true);
 
             // 3. Declare the main queue and its bindings.
             await channel.QueueDeclareAsync(queue: _queueName, durable: true, exclusive: false, autoDelete: false);
@@ -248,8 +245,6 @@ namespace RabbitMq.Messaging.Consumer
             await channel.QueueBindAsync(queue: _queueName, exchange: _exchangeName, routingKey: "");
             // Bind 2: To the Direct exchange to receive messages being requeued after a retry.
             await channel.QueueBindAsync(queue: _queueName, exchange: _retryHandlerExchange, routingKey: _directToQueueKey);
-            // Bind 3: To the Direct exchange requeue
-            await channel.QueueBindAsync(queue: _queueName, exchange: _exchangeRequeue, routingKey: _queueName);
 
             // 4. Declare the retry queue and its arguments.
             var retryQueueArgs = new Dictionary<string, object>

@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "Api + Worker",
+    "Projects": [
+      {
+        "Path": "examples\\RabbitMq.Example.Api\\RabbitMq.Example.Api.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "examples\\RabbitMq.Example.Workers\\RabbitMq.Example.Workers.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
