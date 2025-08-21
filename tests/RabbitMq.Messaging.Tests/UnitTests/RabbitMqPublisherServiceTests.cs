@@ -10,7 +10,7 @@ public class RabbitMqPublisherServiceTests
 {
     [Fact]
     public async Task PublishMessage_PublishesMessageWithCorrectParameters()
-    {        
+    {
         // Arrange
         var mockConnection = new Mock<IConnection>();
         var mockChannel = new Mock<IChannel>();
