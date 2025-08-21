@@ -10,7 +10,7 @@
         /// <summary> 
         /// Hosts RabbitMQ 
         /// </summary> 
-        public List<string> Hosts { get; set; } = ["localhost"];
+        public List<string> Hosts { get; set; }
 
         /// <summary> 
         /// Port - the default is 5672 
