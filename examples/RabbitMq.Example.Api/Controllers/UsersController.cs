@@ -24,7 +24,7 @@ namespace RabbitMq.Example.Api.Controllers
 
             // Publish to direct exchange
             await _publisher.PublishMessage(newUser, "new-user-exchange-direct", exchangeType: ExchangeType.Direct, routingKey: "user.created");
-            
+
             // Publish to topic exchange
             await _publisher.PublishMessage(newUser, "new-user-exchange-topic", exchangeType: ExchangeType.Topic, routingKey: "user.whatever");
 

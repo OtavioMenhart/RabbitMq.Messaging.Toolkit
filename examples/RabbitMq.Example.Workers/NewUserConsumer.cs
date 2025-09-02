@@ -12,8 +12,8 @@ namespace RabbitMq.Example.Workers
             IConnection connection,
             ILogger<NewUserConsumer> logger)
             : base(
-                  configuration, 
-                  connection, 
+                  configuration,
+                  connection,
                   logger,
                   new[]
                   {
