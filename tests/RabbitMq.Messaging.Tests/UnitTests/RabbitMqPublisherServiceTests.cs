@@ -1,5 +1,7 @@
+using AutoFixture;
+using AutoFixture.AutoNSubstitute;
 using Microsoft.Extensions.Logging;
-using Moq;
+using NSubstitute;
 using RabbitMq.Messaging.Publisher;
 using RabbitMQ.Client;
 using System.Text.Json;
@@ -8,43 +10,48 @@ namespace RabbitMq.Messaging.Tests.UnitTests;
 
 public class RabbitMqPublisherServiceTests
 {
+    private readonly IFixture _fixture;
+
+    public RabbitMqPublisherServiceTests()
+    {
+        _fixture = new Fixture().Customize(new AutoNSubstituteCustomization { ConfigureMembers = true });
+    }
+
     [Fact]
     public async Task PublishMessage_PublishesMessageWithCorrectParameters()
     {
         // Arrange
-        var mockConnection = new Mock<IConnection>();
-        var mockChannel = new Mock<IChannel>();
-        var mockLogger = new Mock<ILogger<RabbitMqPublisherService>>();
+        var mockConnection = _fixture.Freeze<IConnection>();
+        var mockChannel = _fixture.Freeze<IChannel>();
+        var mockLogger = _fixture.Freeze<ILogger<RabbitMqPublisherService>>();
 
         mockConnection
-            .Setup(c => c.CreateChannelAsync(It.IsAny<CreateChannelOptions>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(mockChannel.Object);
+            .CreateChannelAsync(Arg.Any<CreateChannelOptions>(), Arg.Any<CancellationToken>())
+            .Returns(mockChannel);
 
         mockChannel
-            .Setup(c => c.ExchangeDeclareAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<bool>(),
-                It.IsAny<bool>(),
-                It.IsAny<IDictionary<string, object?>>(),
-                It.IsAny<bool>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
+            .ExchangeDeclareAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<bool>(),
+                Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(),
+                Arg.Any<bool>(),
+                Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
         mockChannel
-            .Setup(c => c.BasicPublishAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<bool>(),
-                It.IsAny<BasicProperties>(),
-                It.IsAny<ReadOnlyMemory<byte>>(),
-                It.IsAny<CancellationToken>()
-             ))
+            .BasicPublishAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<bool>(),
+                Arg.Any<BasicProperties>(),
+                Arg.Any<ReadOnlyMemory<byte>>(),
+                Arg.Any<CancellationToken>())
             .Returns(new ValueTask());
 
-
-        var service = new RabbitMqPublisherService(mockConnection.Object, mockLogger.Object);
+        var service = new RabbitMqPublisherService(mockConnection, mockLogger);
 
         var testMessage = new { Text = "Hello" };
         var exchangeName = "test-exchange";
@@ -63,67 +70,65 @@ public class RabbitMqPublisherServiceTests
             routingKey);
 
         // Assert
-        mockChannel.Verify(c => c.ExchangeDeclareAsync(
-            It.Is<string>(s => s == exchangeName),
-            It.Is<string>(s => s == exchangeType),
-            It.Is<bool>(b => b == true),
-            It.Is<bool>(b => b == false),
-            It.Is<IDictionary<string, object?>?>(d => d == null),
-            It.Is<bool>(b => b == false),
-            It.Is<bool>(b => b == false),
-            It.IsAny<CancellationToken>()), Times.Once);
+        await mockChannel.Received(1).ExchangeDeclareAsync(
+            Arg.Is<string>(s => s == exchangeName),
+            Arg.Is<string>(s => s == exchangeType),
+            Arg.Is<bool>(b => b == true),
+            Arg.Is<bool>(b => b == false),
+            Arg.Is<IDictionary<string, object?>?>(d => d == null),
+            Arg.Is<bool>(b => b == false),
+            Arg.Is<bool>(b => b == false),
+            Arg.Any<CancellationToken>());
 
-        mockChannel.Verify(c => c.BasicPublishAsync(
-            It.Is<string>(s => s == exchangeName),
-            It.Is<string>(s => s == routingKey),
-            It.Is<bool>(b => b == true),
-            It.Is<BasicProperties>(p =>
+        await mockChannel.Received(1).BasicPublishAsync(
+            Arg.Is<string>(s => s == exchangeName),
+            Arg.Is<string>(s => s == routingKey),
+            Arg.Is<bool>(b => b == true),
+            Arg.Is<BasicProperties>(p =>
                 p.Persistent == true &&
                 p.ContentType == "application/json" &&
                 p.Headers != null &&
                 p.Headers.ContainsKey("key") &&
                 ($"{p.Headers["key"]}" == "value")),
-            It.IsAny<ReadOnlyMemory<byte>>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            Arg.Any<ReadOnlyMemory<byte>>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task PublishMessage_LogsErrorOnException()
     {
         // Arrange
-        var mockConnection = new Mock<IConnection>();
-        var mockChannel = new Mock<IChannel>();
-        var mockLogger = new Mock<ILogger<RabbitMqPublisherService>>();
+        var mockConnection = _fixture.Freeze<IConnection>();
+        var mockChannel = _fixture.Freeze<IChannel>();
+        var mockLogger = _fixture.Freeze<ILogger<RabbitMqPublisherService>>();
 
         mockConnection
-            .Setup(c => c.CreateChannelAsync(It.IsAny<CreateChannelOptions>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(mockChannel.Object);
+            .CreateChannelAsync(Arg.Any<CreateChannelOptions>(), Arg.Any<CancellationToken>())
+            .Returns(mockChannel);
 
         mockChannel
-            .Setup(c => c.ExchangeDeclareAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<bool>(),
-                It.IsAny<bool>(),
-                It.IsAny<IDictionary<string, object?>>(),
-                It.IsAny<bool>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Exchange error"));
+            .ExchangeDeclareAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<bool>(),
+                Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(),
+                Arg.Any<bool>(),
+                Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("Exchange error"));
 
-        var service = new RabbitMqPublisherService(mockConnection.Object, mockLogger.Object);
+        var service = new RabbitMqPublisherService(mockConnection, mockLogger);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.PublishMessage(new { }, "ex"));
 
-        mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => ($"{v}").Contains("Failed to publish message")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        mockLogger.Received(1).Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(v => v.ToString().Contains("Failed to publish message")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
     }
 }
