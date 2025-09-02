@@ -70,25 +70,30 @@ services.AddRabbitMqPublisher();
 Inject `IRabbitMqPublisherService` and publish messages:
 
 ```csharp
-public class MyService
+[Route("api/[controller]")]
+[ApiController]
+public class UsersController : ControllerBase
 {
     private readonly IRabbitMqPublisherService _publisher;
 
-    public MyService(IRabbitMqPublisherService publisher)
+    public UsersController(IRabbitMqPublisherService publisher)
     {
         _publisher = publisher;
     }
 
-    public async Task SendMessageAsync()
+    [HttpPost]
+    public async Task<IActionResult> CreateUser([FromBody] NewUserDto newUser)
     {
-        var message = new { Text = "Hello RabbitMQ!" };
-        await _publisher.PublishMessage(
-            message,
-            exchangeName: "my-exchange",
-            headers: new Dictionary<string, string> { { "custom-header", "value" } },
-            exchangeType: RabbitMQ.Client.ExchangeType.Fanout,
-            routingKey: "" // Usually empty for Fanout
-        );
+        // Fanout
+        await _publisher.PublishMessage(newUser, "new-user-exchange");
+
+        // Direct
+        await _publisher.PublishMessage(newUser, "new-user-exchange-direct", exchangeType: ExchangeType.Direct, routingKey: "user.created");
+
+        // Topic
+        await _publisher.PublishMessage(newUser, "new-user-exchange-topic", exchangeType: ExchangeType.Topic, routingKey: "user.whatever");
+
+        return Ok($"User '{newUser.Name}' created successfully.");
     }
 }
 ```
@@ -108,21 +113,25 @@ public class MyService
 Create a consumer by inheriting from `BaseConsumer<TNotification>`:
 
 ```csharp
-public class MyConsumer : BaseConsumer<MyNotification>
+public class UserCreatedConsumer : BaseConsumer<NewUserDto>
 {
-    public MyConsumer(
+    public UserCreatedConsumer(
         IConfiguration config,
         IConnection conn,
-        ILogger logger
-    ) : base(config, conn, logger, "my-exchange", "my-queue") { }
+        ILogger<UserCreatedConsumer> logger
+    ) : base(config, conn, logger, new[] {
+        new ExchangeBinding("new-user-exchange", ExchangeType.Fanout),
+        new ExchangeBinding("new-user-exchange-direct", ExchangeType.Direct, "user.created"),
+        new ExchangeBinding("new-user-exchange-topic", ExchangeType.Topic, "user.*")
+    }, "user-created-queue") { }
 
     protected override async Task HandleMessageAsync(
         byte[] messageBody,
         IReadOnlyBasicProperties properties,
         CancellationToken cancellationToken)
     {
-        var message = JsonSerializer.Deserialize<MyNotification>(messageBody);
-        // Processing logic...
+        var user = JsonSerializer.Deserialize<NewUserDto>(messageBody);
+        // Lógica de processamento do usuário
         await Task.CompletedTask;
     }
 }
@@ -132,7 +141,7 @@ public class MyConsumer : BaseConsumer<MyNotification>
 - `IConfiguration` → for Retry/DLQ settings  
 - `IConnection` → RabbitMQ connection  
 - `ILogger` → injected logger  
-- `exchangeName` → exchange name  
+- `IEnumerable<ExchangeBinding>` → exchange bindings  
 - `queueName` → queue name  
 
 ### 🔑 Registering the Consumer
@@ -140,7 +149,7 @@ public class MyConsumer : BaseConsumer<MyNotification>
 To activate the consumer, you must register it as a **HostedService**:
 
 ```csharp
-services.AddHostedService<MyConsumer>();
+services.AddHostedService<UserCreatedConsumer>();
 ```
 
 ---
