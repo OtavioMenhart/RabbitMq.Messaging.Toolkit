@@ -10,26 +10,11 @@ namespace RabbitMq.Messaging.Consumer
     public abstract class BaseConsumer<TNotification> : BackgroundService where TNotification : class
     {
         // Internal channels for decoupling and inter-task communication.
-        // Using System.Threading.Channels is a modern and efficient way to manage concurrent data pipelines.
-
-        /// <summary>
-        /// A dedicated channel to enqueue the DeliveryTags of messages that have been processed (either successfully or with a handled failure)
-        /// and are ready to be acknowledged (ACKed) in RabbitMQ.
-        /// </summary>
         private readonly Channel<ulong> _ackChannel;
-
-        /// <summary>
-        /// The main channel that acts as a buffer. The RabbitMQ consumer writes received messages here,
-        /// and the parallel workers read from it for processing.
-        /// </summary>
         private readonly Channel<MessageSnapshot> _messageChannel;
-
-        /// <summary>
-        /// The shared, long-lived, and thread-safe connection to the RabbitMQ server.
-        /// </summary>
         private readonly IConnection _connection;
 
-        // Names of queues and exchanges that will be defined during the topology declaration.
+        // Retry/DLQ topology names (decoupled from main exchanges)
         private string _retryHandlerExchange = null!;
         private string _retryQueue = null!;
         private string _dlxExchangeName = null!;
@@ -37,10 +22,12 @@ namespace RabbitMq.Messaging.Consumer
         private string _directToQueueKey = null!;
         private string _directToRetryKey = null!;
 
-        // --- Protected Members ---
+        // Protected members
         protected readonly ILogger _logger;
-        protected readonly string _exchangeName;
         protected readonly string _queueName;
+
+        // Main exchange bindings
+        private readonly List<ExchangeBinding> _mainExchangeBindings;
 
         /// <summary>
         /// Defines the number of worker tasks that will process messages in parallel.
@@ -65,23 +52,16 @@ namespace RabbitMq.Messaging.Consumer
         /// </summary>
         private readonly int _retryTtlMilliseconds;
 
-        /// <summary>
-        /// Constructor for the BaseConsumer class.
-        /// </summary>
-        /// <param name="connection">The singleton connection to RabbitMQ.</param>
-        /// <param name="logger">The logger for recording information and errors.</param>
-        /// <param name="exchangeName">The name of the main exchange to consume from.</param>
-        /// <param name="queueName">The name of the main queue to be created and consumed.</param>
-        public BaseConsumer(
-            IConfiguration configuration,
-            IConnection connection,
-            ILogger logger,
-            string exchangeName,
-            string queueName)
+        protected BaseConsumer(
+                IConfiguration configuration,
+                IConnection connection,
+                ILogger logger,
+                IEnumerable<ExchangeBinding> mainExchangeBindings,
+                string queueName)
         {
             _connection = connection;
             _logger = logger;
-            _exchangeName = exchangeName;
+            _mainExchangeBindings = mainExchangeBindings.ToList();
             _queueName = queueName;
 
             _messageChannel = Channel.CreateUnbounded<MessageSnapshot>();
@@ -224,27 +204,30 @@ namespace RabbitMq.Messaging.Consumer
         private async Task DeclareTopologyAsync(IChannel channel)
         {
             // Define names for all components based on the main exchange and queue names for isolation.
-            _retryHandlerExchange = $"{_exchangeName}-retry-handler";
+            _retryHandlerExchange = $"{_queueName}-retry-handler";
             _retryQueue = $"{_queueName}-retry";
-            _dlxExchangeName = $"{_exchangeName}-{_queueName}-dlx";
+            _dlxExchangeName = $"{_queueName}-dlx";
             _dlqQueueName = $"{_queueName}-dlq";
 
             // Define unique routing keys for this specific consumer's queue.
             _directToQueueKey = $"key-direct-to-{_queueName}";
             _directToRetryKey = $"key-direct-to-retry-{_queueName}";
 
-            // 1. Declare the main exchange (Fanout) for broadcasting new messages.
-            await channel.ExchangeDeclareAsync(exchange: _exchangeName, type: ExchangeType.Fanout, durable: true);
+            // 1. Declare all main exchanges and bind the queue to each with its routing key.
+            await channel.QueueDeclareAsync(queue: _queueName, durable: true, exclusive: false, autoDelete: false);
+
+            foreach (var binding in _mainExchangeBindings)
+            {
+                await channel.ExchangeDeclareAsync(binding.ExchangeName, binding.ExchangeType, durable: true);
+                await channel.QueueBindAsync(queue: _queueName, exchange: binding.ExchangeName, routingKey: binding.RoutingKey ?? "");
+            }
 
             // 2. Declare the retry handler exchange (Direct) for targeted redelivery and requeue.
             await channel.ExchangeDeclareAsync(exchange: _retryHandlerExchange, type: ExchangeType.Direct, durable: true);
 
-            // 3. Declare the main queue and its bindings.
-            await channel.QueueDeclareAsync(queue: _queueName, durable: true, exclusive: false, autoDelete: false);
-            // Bind 1: To the Fanout exchange to receive all new broadcast messages.
-            await channel.QueueBindAsync(queue: _queueName, exchange: _exchangeName, routingKey: "");
-            // Bind 2: To the Direct exchange to receive messages being requeued after a retry.
+            // 3. Bind the queue to the retry handler and requeue exchanges.
             await channel.QueueBindAsync(queue: _queueName, exchange: _retryHandlerExchange, routingKey: _directToQueueKey);
+
 
             // 4. Declare the retry queue and its arguments.
             var retryQueueArgs = new Dictionary<string, object>
@@ -258,7 +241,6 @@ namespace RabbitMq.Messaging.Consumer
             };
 
             await channel.QueueDeclareAsync(queue: _retryQueue, durable: true, exclusive: false, autoDelete: false, arguments: retryQueueArgs);
-            // Bind the retry queue to the Direct exchange to receive failed messages from the worker.
             await channel.QueueBindAsync(queue: _retryQueue, exchange: _retryHandlerExchange, routingKey: _directToRetryKey);
 
             // 5. Declare the final Dead-Letter Queue (DLQ) for analysis of failed messages.
