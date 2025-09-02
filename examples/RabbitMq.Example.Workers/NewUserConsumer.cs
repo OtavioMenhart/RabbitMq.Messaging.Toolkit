@@ -11,7 +11,32 @@ namespace RabbitMq.Example.Workers
             IConfiguration configuration,
             IConnection connection,
             ILogger<NewUserConsumer> logger)
-            : base(configuration, connection, logger, "new-user-exchange", "new.user.queue")
+            : base(
+                  configuration, 
+                  connection, 
+                  logger,
+                  new[]
+                  {
+                      new ExchangeBinding
+                      (
+                          ExchangeName: "new-user-exchange",
+                          ExchangeType: ExchangeType.Fanout,
+                          RoutingKey: ""
+                      ),
+                      new ExchangeBinding
+                      (
+                          ExchangeName: "new-user-exchange-direct",
+                          ExchangeType: ExchangeType.Direct,
+                          RoutingKey: "user.created"
+                      ),
+                      new ExchangeBinding
+                      (
+                          ExchangeName: "new-user-exchange-topic",
+                          ExchangeType: ExchangeType.Topic,
+                          RoutingKey: "user.*"
+                      )
+                  },
+                  "new.user.queue")
         {
             // You can configure additional settings for the consumer here if needed.
             _prefetchCount = 50;

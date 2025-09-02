@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using RabbitMq.Example.Domain.Dto;
 using RabbitMq.Messaging.Publisher;
+using RabbitMQ.Client;
 
 namespace RabbitMq.Example.Api.Controllers
 {
@@ -18,8 +19,15 @@ namespace RabbitMq.Example.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateUser([FromBody] NewUserDto newUser)
         {
-            // Publish the user creation event to RabbitMQ
+            // Publish to fanout exchange
             await _publisher.PublishMessage(newUser, "new-user-exchange");
+
+            // Publish to direct exchange
+            await _publisher.PublishMessage(newUser, "new-user-exchange-direct", exchangeType: ExchangeType.Direct, routingKey: "user.created");
+            
+            // Publish to topic exchange
+            await _publisher.PublishMessage(newUser, "new-user-exchange-topic", exchangeType: ExchangeType.Topic, routingKey: "user.whatever");
+
             return Ok($"User '{newUser.Name}' created successfully.");
         }
     }
