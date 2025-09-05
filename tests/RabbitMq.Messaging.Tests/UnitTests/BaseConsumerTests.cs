@@ -149,14 +149,7 @@ namespace RabbitMq.Messaging.Tests.UnitTests
             var deliveryTag = 3UL;
             var body = Encoding.UTF8.GetBytes("{\"message\":\"max-retries\"}");
 
-            var xDeathHeader = new List<object>
-            {
-                new Dictionary<string, object?>
-                {
-                    { "count", 3L }
-                }
-            };
-            var headers = new Dictionary<string, object?> { { "x-death", xDeathHeader } };
+            var headers = new Dictionary<string, object?> { { "x-retry-count", 3 } };
             var mockProperties = Substitute.For<IReadOnlyBasicProperties>();
             mockProperties.Headers.Returns(headers);
 
