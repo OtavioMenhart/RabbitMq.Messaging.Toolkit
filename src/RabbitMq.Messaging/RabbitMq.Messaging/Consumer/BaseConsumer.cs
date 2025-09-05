@@ -257,6 +257,12 @@ namespace RabbitMq.Messaging.Consumer
             var newProps = CreateClonedProperties(snapshot.Properties);
             AddExceptionInfoToHeaders(newProps, ex);
 
+            int retryCount = 0;
+            if (newProps.Headers.TryGetValue("x-retry-count", out var retryObj))
+                retryCount = Convert.ToInt32(retryObj);
+
+            newProps.Headers["x-retry-count"] = retryCount + 1;
+
             // Publishes to the Direct exchange using the key that leads to the retry queue.
             return channel.BasicPublishAsync(
                 exchange: _retryHandlerExchange,
@@ -329,23 +335,13 @@ namespace RabbitMq.Messaging.Consumer
         }
 
         /// <summary>
-        /// Extracts the retry count from the 'x-death' header of the message.
+        /// Extracts the retry count from the 'x-retry-count' header of the message.
         /// </summary>
-        /// <remarks>
-        /// This is a simple implementation. A more robust version would also check the queue name
-        /// within the 'x-death' header to avoid miscounting retries from other queues.
-        /// </remarks>
         private static int GetRetryCount(IReadOnlyBasicProperties props)
         {
-            if (props.Headers != null && props.Headers.TryGetValue("x-death", out var deathHeader))
-            {
-                var xDeathList = deathHeader as List<object>;
-                if (xDeathList?.FirstOrDefault() is Dictionary<string, object> deathInfo &&
-                    deathInfo.TryGetValue("count", out var countObj))
-                {
-                    return Convert.ToInt32(countObj);
-                }
-            }
+            if (props.Headers != null && props.Headers.TryGetValue("x-retry-count", out var retryObj))
+                return Convert.ToInt32(retryObj);
+
             return 0;
         }
     }
