@@ -8,16 +8,12 @@
 
 	<PropertyGroup>
 		<PackageId>RabbitMq.Messaging.Toolkit</PackageId>
-		<Version>1.0.4</Version>
+		<Version>1.0.5</Version>
 		<Authors>Tools BR</Authors>
 		<Description>A simple and robust abstraction for RabbitMQ messaging in .NET, designed to streamline integration and enhance reliability in distributed applications.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<RepositoryUrl>https://github.com/OtavioMenhart/RabbitMq.Messaging.Toolkit</RepositoryUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<PackageReleaseNotes>
-			- Queues listened by BaseConsumer are now bound to all exchange types.
-			- Added publishing examples for all exchange types in UsersController.
-		</PackageReleaseNotes>
 	</PropertyGroup>
 
 	<ItemGroup>
