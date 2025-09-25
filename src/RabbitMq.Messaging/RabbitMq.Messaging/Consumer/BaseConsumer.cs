@@ -3,6 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using System.Diagnostics;
+using System.Text;
 using System.Threading.Channels;
 
 namespace RabbitMq.Messaging.Consumer
@@ -108,10 +110,21 @@ namespace RabbitMq.Messaging.Consumer
             var consumer = new AsyncEventingBasicConsumer(consumerChannel);
             consumer.ReceivedAsync += async (sender, ea) =>
             {
+                string? traceParent = null;
+                if (ea.BasicProperties.Headers != null &&
+                    ea.BasicProperties.Headers.TryGetValue("traceparent", out var traceParentObj))
+                {
+                    if (traceParentObj is byte[] traceParentBytes)
+                    {
+                        traceParent = Encoding.UTF8.GetString(traceParentBytes);
+                    }
+                }
+
                 var snapshot = new MessageSnapshot(
                     ea.Body.ToArray(),      // This creates a new byte array, making our copy safe.
                     ea.BasicProperties,
-                    ea.DeliveryTag
+                    ea.DeliveryTag,
+                    traceParent
                 );
                 // Just forwards the message to the internal buffer, no processing here.
                 await _messageChannel.Writer.WriteAsync(snapshot, stoppingToken);
@@ -155,12 +168,24 @@ namespace RabbitMq.Messaging.Consumer
         /// </summary>
         private async Task StartWorkerAsync(CancellationToken stoppingToken)
         {
+            using var activitySource = new System.Diagnostics.ActivitySource("Worker.Processing");
             // Each worker gets its own channel to publish to retry/DLQ queues.
             // This avoids concurrency issues from using a shared channel.
             using var processingChannel = await _connection.CreateChannelAsync();
 
             await foreach (var snapshot in _messageChannel.Reader.ReadAllAsync(stoppingToken))
             {
+                ActivityContext parentContext = default;
+                if (!string.IsNullOrEmpty(snapshot.TraceParent))
+                {
+                    ActivityContext.TryParse(snapshot.TraceParent, null, out parentContext);
+                }
+
+                using var activity = activitySource.StartActivity(
+                    "ProcessMessage",
+                    System.Diagnostics.ActivityKind.Internal,
+                    parentContext);
+
                 try
                 {
                     var retryCount = GetRetryCount(snapshot.Properties);

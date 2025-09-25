@@ -6,5 +6,5 @@ namespace RabbitMq.Messaging.Consumer
     /// Represents a safe, immutable snapshot of a received message.
     /// This is crucial to prevent issues with buffer reuse by the RabbitMQ client library.
     /// </summary>
-    public record MessageSnapshot(byte[] Body, IReadOnlyBasicProperties Properties, ulong DeliveryTag);
+    public record MessageSnapshot(byte[] Body, IReadOnlyBasicProperties Properties, ulong DeliveryTag, string? TraceParent);
 }
