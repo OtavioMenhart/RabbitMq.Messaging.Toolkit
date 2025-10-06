@@ -120,7 +120,7 @@ public class UserCreatedConsumer : BaseConsumer<NewUserDto>
         IConnection conn,
         ILogger<UserCreatedConsumer> logger
     ) : base(config, conn, logger, new[] {
-        new ExchangeBinding("new-user-exchange", ExchangeType.Fanout),
+        new ExchangeBinding("new-user-exchange", ExchangeType.Fanout, ""),
         new ExchangeBinding("new-user-exchange-direct", ExchangeType.Direct, "user.created"),
         new ExchangeBinding("new-user-exchange-topic", ExchangeType.Topic, "user.*")
     }, "user-created-queue") { }
