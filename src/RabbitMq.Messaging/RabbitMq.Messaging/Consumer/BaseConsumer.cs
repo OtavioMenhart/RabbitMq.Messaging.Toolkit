@@ -96,17 +96,37 @@ namespace RabbitMq.Messaging.Consumer
             using var setupChannel = await _connection.CreateChannelAsync();
             await DeclareTopologyAsync(setupChannel);
 
-            // 2. Create the channel that will actually receive messages from RabbitMQ.
+            // 2. Start the consumer pipeline
+            await StartConsumerPipelineAsync(stoppingToken);
+
+            // 3. Register the recovery event handler
+            _connection.RecoverySucceededAsync += async (_, __) =>
+            {
+                _logger.LogWarning("RabbitMQ connection recovered. Restarting consumer pipeline for queue [{QueueName}]...", _queueName);
+                // Ensure topology is declared after recovery
+                using var recoveryChannel = await _connection.CreateChannelAsync();
+                await DeclareTopologyAsync(recoveryChannel);
+
+                await StartConsumerPipelineAsync(stoppingToken);
+            };
+
+            // 4. Wait for cancellation
+            await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+
+        /// <summary>
+        /// Initializes the consumer pipeline: channel, consumer, workers, and acker.
+        /// </summary>
+        private async Task StartConsumerPipelineAsync(CancellationToken stoppingToken)
+        {
             var consumerChannel = await _connection.CreateChannelAsync();
             await consumerChannel.BasicQosAsync(0, _prefetchCount, false);
 
-            // 3. Start the background support tasks.
             var ackerTask = StartAckerTask(consumerChannel, stoppingToken);
             var workerTasks = Enumerable.Range(0, _parallelWorkerCount)
                 .Select(_ => StartWorkerAsync(stoppingToken))
                 .ToList();
 
-            // 4. Configure and start the consumer that reads from RabbitMQ and feeds the _messageChannel.
             var consumer = new AsyncEventingBasicConsumer(consumerChannel);
             consumer.ReceivedAsync += async (sender, ea) =>
             {
@@ -121,19 +141,21 @@ namespace RabbitMq.Messaging.Consumer
                 }
 
                 var snapshot = new MessageSnapshot(
-                    ea.Body.ToArray(),      // This creates a new byte array, making our copy safe.
+                    ea.Body.ToArray(),
                     ea.BasicProperties,
                     ea.DeliveryTag,
                     traceParent
                 );
-                // Just forwards the message to the internal buffer, no processing here.
                 await _messageChannel.Writer.WriteAsync(snapshot, stoppingToken);
             };
             await consumerChannel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer);
 
-            // 5. Wait for all tasks to complete for a graceful shutdown.
-            await Task.WhenAll(workerTasks.Concat(new[] { ackerTask }));
-            await consumerChannel.CloseAsync();
+            // Run workers and acker in background (do not block pipeline)
+            _ = Task.Run(async () =>
+            {
+                await Task.WhenAll(workerTasks.Concat(new[] { ackerTask }));
+                await consumerChannel.CloseAsync();
+            }, stoppingToken);
         }
 
         /// <summary>
