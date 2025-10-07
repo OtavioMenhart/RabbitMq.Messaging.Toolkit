@@ -54,6 +54,8 @@ namespace RabbitMq.Messaging.Consumer
         /// </summary>
         private readonly int _retryTtlMilliseconds;
 
+        private CancellationTokenSource? _pipelineCts;
+
         protected BaseConsumer(
                 IConfiguration configuration,
                 IConnection connection,
@@ -103,11 +105,19 @@ namespace RabbitMq.Messaging.Consumer
             _connection.RecoverySucceededAsync += async (_, __) =>
             {
                 _logger.LogWarning("RabbitMQ connection recovered. Restarting consumer pipeline for queue [{QueueName}]...", _queueName);
-                // Ensure topology is declared after recovery
-                using var recoveryChannel = await _connection.CreateChannelAsync();
-                await DeclareTopologyAsync(recoveryChannel);
 
-                await StartConsumerPipelineAsync(stoppingToken);
+                _pipelineCts?.Cancel();
+                ClearMessageChannel();
+                ClearAckChannel();
+
+                _ = Task.Run(async () =>
+                {
+                    // Ensure topology is declared after recovery
+                    using var recoveryChannel = await _connection.CreateChannelAsync();
+                    await DeclareTopologyAsync(recoveryChannel);
+
+                    await StartConsumerPipelineAsync(stoppingToken);
+                }, stoppingToken);
             };
 
             // 4. Wait for cancellation
@@ -119,12 +129,16 @@ namespace RabbitMq.Messaging.Consumer
         /// </summary>
         private async Task StartConsumerPipelineAsync(CancellationToken stoppingToken)
         {
-            var consumerChannel = await _connection.CreateChannelAsync();
-            await consumerChannel.BasicQosAsync(0, _prefetchCount, false);
+            _pipelineCts?.Cancel();
+            _pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var pipelineToken = _pipelineCts.Token;
 
-            var ackerTask = StartAckerTask(consumerChannel, stoppingToken);
+            var consumerChannel = await _connection.CreateChannelAsync(cancellationToken: pipelineToken);
+            await consumerChannel.BasicQosAsync(0, _prefetchCount, false, cancellationToken: pipelineToken);
+
+            var ackerTask = StartAckerTask(consumerChannel, pipelineToken);
             var workerTasks = Enumerable.Range(0, _parallelWorkerCount)
-                .Select(_ => StartWorkerAsync(stoppingToken))
+                .Select(_ => StartWorkerAsync(pipelineToken))
                 .ToList();
 
             var consumer = new AsyncEventingBasicConsumer(consumerChannel);
@@ -146,16 +160,26 @@ namespace RabbitMq.Messaging.Consumer
                     ea.DeliveryTag,
                     traceParent
                 );
-                await _messageChannel.Writer.WriteAsync(snapshot, stoppingToken);
+                await _messageChannel.Writer.WriteAsync(snapshot, pipelineToken);
             };
-            await consumerChannel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer);
+            string consumerTag = await consumerChannel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer, pipelineToken);
 
             // Run workers and acker in background (do not block pipeline)
             _ = Task.Run(async () =>
             {
-                await Task.WhenAll(workerTasks.Concat(new[] { ackerTask }));
-                await consumerChannel.CloseAsync();
-            }, stoppingToken);
+                try
+                {
+                    await Task.WhenAll(workerTasks.Concat(new[] { ackerTask }));
+                }
+                finally
+                {
+                    if (consumerChannel.IsOpen)
+                    {
+                        await consumerChannel.BasicCancelAsync(consumerTag);
+                        await consumerChannel.CloseAsync();
+                    }
+                }
+            }, pipelineToken);
         }
 
         /// <summary>
@@ -390,6 +414,21 @@ namespace RabbitMq.Messaging.Consumer
                 return Convert.ToInt32(retryObj);
 
             return 0;
+        }
+
+        private void ClearAckChannel()
+        {
+            _logger.LogDebug("Clearing ACK channel...");
+            while (_ackChannel.Reader.TryRead(out _)) { }
+        }
+
+        private void ClearMessageChannel()
+        {
+            _logger.LogDebug("Clearing in-flight message channel...");
+            while (_messageChannel.Reader.TryRead(out var snapshot))
+            {
+                _logger.LogWarning("Discarding stale message with DeliveryTag {DeliveryTag} after connection recovery.", snapshot.DeliveryTag);
+            }
         }
     }
 }
