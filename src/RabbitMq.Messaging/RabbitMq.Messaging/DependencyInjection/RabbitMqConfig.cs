@@ -41,7 +41,7 @@ namespace RabbitMq.Messaging.DependencyInjection
                                        .Select(host => new AmqpTcpEndpoint(host, options.Port))
                                        .ToList();
 
-                return factory.CreateConnectionAsync(endpoints).ConfigureAwait(false).GetAwaiter().GetResult();
+                return factory.CreateConnectionAsync(endpoints).GetAwaiter().GetResult();
             });
             return services;
         }

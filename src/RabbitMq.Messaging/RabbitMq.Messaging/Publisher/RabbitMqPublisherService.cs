@@ -34,7 +34,7 @@ namespace RabbitMq.Messaging.Publisher
             string exchangeType = ExchangeType.Fanout,
             string routingKey = "")
         {
-            using var channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+            using var channel = await _connection.CreateChannelAsync();
 
             try
             {
@@ -44,7 +44,7 @@ namespace RabbitMq.Messaging.Publisher
                     durable: true,
                     autoDelete: false,
                     arguments: null
-                ).ConfigureAwait(false);
+                );
 
                 var jsonMessage = JsonSerializer.Serialize(message, serializerOptions);
                 var body = Encoding.UTF8.GetBytes(jsonMessage);
@@ -75,7 +75,7 @@ namespace RabbitMq.Messaging.Publisher
                     mandatory: true,
                     basicProperties: props,
                     body: body
-                ).ConfigureAwait(false);
+                );
             }
             catch (Exception ex)
             {
