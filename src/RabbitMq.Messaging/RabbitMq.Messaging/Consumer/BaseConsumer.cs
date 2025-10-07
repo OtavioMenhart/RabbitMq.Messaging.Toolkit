@@ -95,11 +95,11 @@ namespace RabbitMq.Messaging.Consumer
 
             // 1. Use a temporary channel to declare the entire topology of exchanges and queues.
             // The declaration is idempotent, so it's safe to run on startup.
-            using var setupChannel = await _connection.CreateChannelAsync();
-            await DeclareTopologyAsync(setupChannel);
+            using var setupChannel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+            await DeclareTopologyAsync(setupChannel).ConfigureAwait(false);
 
             // 2. Start the consumer pipeline
-            await StartConsumerPipelineAsync(stoppingToken);
+            await StartConsumerPipelineAsync(stoppingToken).ConfigureAwait(false);
 
             // 3. Register the recovery event handler
             _connection.RecoverySucceededAsync += async (_, __) =>
@@ -113,15 +113,14 @@ namespace RabbitMq.Messaging.Consumer
                 _ = Task.Run(async () =>
                 {
                     // Ensure topology is declared after recovery
-                    using var recoveryChannel = await _connection.CreateChannelAsync();
-                    await DeclareTopologyAsync(recoveryChannel);
+                    using var recoveryChannel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+                    await DeclareTopologyAsync(recoveryChannel).ConfigureAwait(false);
 
-                    await StartConsumerPipelineAsync(stoppingToken);
+                    await StartConsumerPipelineAsync(stoppingToken).ConfigureAwait(false);
                 }, stoppingToken);
             };
 
-            // 4. Wait for cancellation
-            await Task.Delay(Timeout.Infinite, stoppingToken);
+            await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -133,8 +132,8 @@ namespace RabbitMq.Messaging.Consumer
             _pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             var pipelineToken = _pipelineCts.Token;
 
-            var consumerChannel = await _connection.CreateChannelAsync(cancellationToken: pipelineToken);
-            await consumerChannel.BasicQosAsync(0, _prefetchCount, false, cancellationToken: pipelineToken);
+            var consumerChannel = await _connection.CreateChannelAsync(cancellationToken: pipelineToken).ConfigureAwait(false);
+            await consumerChannel.BasicQosAsync(0, _prefetchCount, false, cancellationToken: pipelineToken).ConfigureAwait(false);
 
             var ackerTask = StartAckerTask(consumerChannel, pipelineToken);
             var workerTasks = Enumerable.Range(0, _parallelWorkerCount)
@@ -160,23 +159,22 @@ namespace RabbitMq.Messaging.Consumer
                     ea.DeliveryTag,
                     traceParent
                 );
-                await _messageChannel.Writer.WriteAsync(snapshot, pipelineToken);
+                await _messageChannel.Writer.WriteAsync(snapshot, pipelineToken).ConfigureAwait(false);
             };
-            string consumerTag = await consumerChannel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer, pipelineToken);
+            string consumerTag = await consumerChannel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer, pipelineToken).ConfigureAwait(false);
 
-            // Run workers and acker in background (do not block pipeline)
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await Task.WhenAll(workerTasks.Concat(new[] { ackerTask }));
+                    await Task.WhenAll(workerTasks.Concat(new[] { ackerTask })).ConfigureAwait(false);
                 }
                 finally
                 {
                     if (consumerChannel.IsOpen)
                     {
-                        await consumerChannel.BasicCancelAsync(consumerTag);
-                        await consumerChannel.CloseAsync();
+                        await consumerChannel.BasicCancelAsync(consumerTag).ConfigureAwait(false);
+                        await consumerChannel.CloseAsync().ConfigureAwait(false);
                     }
                 }
             }, pipelineToken);
@@ -192,12 +190,12 @@ namespace RabbitMq.Messaging.Consumer
         private async Task StartAckerTask(IChannel channel, CancellationToken stoppingToken)
         {
             _logger.LogInformation("Centralized Acker task started.");
-            await foreach (var deliveryTag in _ackChannel.Reader.ReadAllAsync(stoppingToken))
+            await foreach (var deliveryTag in _ackChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
                 try
                 {
                     // Acknowledge the message on the correct RabbitMQ channel.
-                    await channel.BasicAckAsync(deliveryTag, false);
+                    await channel.BasicAckAsync(deliveryTag, false).ConfigureAwait(false);
                     _logger.LogTrace("Message with DeliveryTag {DeliveryTag} acknowledged (ACK).", deliveryTag);
                 }
                 catch (Exception ex)
@@ -217,9 +215,9 @@ namespace RabbitMq.Messaging.Consumer
             using var activitySource = new System.Diagnostics.ActivitySource("Worker.Processing");
             // Each worker gets its own channel to publish to retry/DLQ queues.
             // This avoids concurrency issues from using a shared channel.
-            using var processingChannel = await _connection.CreateChannelAsync();
+            using var processingChannel = await _connection.CreateChannelAsync().ConfigureAwait(false);
 
-            await foreach (var snapshot in _messageChannel.Reader.ReadAllAsync(stoppingToken))
+            await foreach (var snapshot in _messageChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
                 ActivityContext parentContext = default;
                 if (!string.IsNullOrEmpty(snapshot.TraceParent))
@@ -238,20 +236,20 @@ namespace RabbitMq.Messaging.Consumer
                     if (retryCount >= _maxRetryAttempts)
                     {
                         _logger.LogWarning("[WORKER] Max retries ({MaxRetryAttempts}) reached. Sending to DLQ.", _maxRetryAttempts);
-                        await PublishToDlqAsync(processingChannel, snapshot);
+                        await PublishToDlqAsync(processingChannel, snapshot).ConfigureAwait(false);
                     }
                     else
                     {
                         try
                         {
                             // Call the abstract method with the actual business logic.
-                            await HandleMessageAsync(snapshot.Body, snapshot.Properties, stoppingToken);
+                            await HandleMessageAsync(snapshot.Body, snapshot.Properties, stoppingToken).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
                             // If the business logic fails, publish to the retry queue.
                             _logger.LogError(ex, "[WORKER] Error processing message. Sending to retry ({RetryCount})...", retryCount + 1);
-                            await PublishToRetryAsync(processingChannel, snapshot, ex);
+                            await PublishToRetryAsync(processingChannel, snapshot, ex).ConfigureAwait(false);
                         }
                     }
                 }
@@ -265,7 +263,7 @@ namespace RabbitMq.Messaging.Consumer
 
                 // After handling (success, retry, or DLQ), send the DeliveryTag to the centralized Acker Task.
                 // The responsibility of sending the ACK is transferred.
-                await _ackChannel.Writer.WriteAsync(snapshot.DeliveryTag, stoppingToken);
+                await _ackChannel.Writer.WriteAsync(snapshot.DeliveryTag, stoppingToken).ConfigureAwait(false);
             }
         }
 
@@ -285,19 +283,19 @@ namespace RabbitMq.Messaging.Consumer
             _directToRetryKey = $"key-direct-to-retry-{_queueName}";
 
             // 1. Declare all main exchanges and bind the queue to each with its routing key.
-            await channel.QueueDeclareAsync(queue: _queueName, durable: true, exclusive: false, autoDelete: false);
+            await channel.QueueDeclareAsync(queue: _queueName, durable: true, exclusive: false, autoDelete: false).ConfigureAwait(false);
 
             foreach (var binding in _mainExchangeBindings)
             {
-                await channel.ExchangeDeclareAsync(binding.ExchangeName, binding.ExchangeType, durable: true);
-                await channel.QueueBindAsync(queue: _queueName, exchange: binding.ExchangeName, routingKey: binding.RoutingKey ?? "");
+                await channel.ExchangeDeclareAsync(binding.ExchangeName, binding.ExchangeType, durable: true).ConfigureAwait(false);
+                await channel.QueueBindAsync(queue: _queueName, exchange: binding.ExchangeName, routingKey: binding.RoutingKey ?? "").ConfigureAwait(false);
             }
 
             // 2. Declare the retry handler exchange (Direct) for targeted redelivery and requeue.
-            await channel.ExchangeDeclareAsync(exchange: _retryHandlerExchange, type: ExchangeType.Direct, durable: true);
+            await channel.ExchangeDeclareAsync(exchange: _retryHandlerExchange, type: ExchangeType.Direct, durable: true).ConfigureAwait(false);
 
             // 3. Bind the queue to the retry handler and requeue exchanges.
-            await channel.QueueBindAsync(queue: _queueName, exchange: _retryHandlerExchange, routingKey: _directToQueueKey);
+            await channel.QueueBindAsync(queue: _queueName, exchange: _retryHandlerExchange, routingKey: _directToQueueKey).ConfigureAwait(false);
 
 
             // 4. Declare the retry queue and its arguments.
@@ -311,13 +309,13 @@ namespace RabbitMq.Messaging.Consumer
                 { "x-dead-letter-routing-key", _directToQueueKey }
             };
 
-            await channel.QueueDeclareAsync(queue: _retryQueue, durable: true, exclusive: false, autoDelete: false, arguments: retryQueueArgs);
-            await channel.QueueBindAsync(queue: _retryQueue, exchange: _retryHandlerExchange, routingKey: _directToRetryKey);
+            await channel.QueueDeclareAsync(queue: _retryQueue, durable: true, exclusive: false, autoDelete: false, arguments: retryQueueArgs).ConfigureAwait(false);
+            await channel.QueueBindAsync(queue: _retryQueue, exchange: _retryHandlerExchange, routingKey: _directToRetryKey).ConfigureAwait(false);
 
             // 5. Declare the final Dead-Letter Queue (DLQ) for analysis of failed messages.
-            await channel.ExchangeDeclareAsync(exchange: _dlxExchangeName, type: ExchangeType.Direct, durable: true);
-            await channel.QueueDeclareAsync(queue: _dlqQueueName, durable: true, exclusive: false, autoDelete: false);
-            await channel.QueueBindAsync(queue: _dlqQueueName, exchange: _dlxExchangeName, routingKey: "");
+            await channel.ExchangeDeclareAsync(exchange: _dlxExchangeName, type: ExchangeType.Direct, durable: true).ConfigureAwait(false);
+            await channel.QueueDeclareAsync(queue: _dlqQueueName, durable: true, exclusive: false, autoDelete: false).ConfigureAwait(false);
+            await channel.QueueBindAsync(queue: _dlqQueueName, exchange: _dlxExchangeName, routingKey: "").ConfigureAwait(false);
         }
 
         /// <summary>
