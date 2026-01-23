@@ -7,6 +7,7 @@ using RabbitMq.Messaging.Publisher;
 using RabbitMQ.Client;
 
 namespace RabbitMq.Messaging.Tests.UnitTests;
+
 public class RabbitMqConfigTests
 {
     [Fact]
